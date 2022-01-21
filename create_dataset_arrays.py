@@ -54,106 +54,138 @@ import tensorflow as tf
 from tensorflow.python.platform import flags
 
 from third_party.node2vec import node2vec
+import argparse
 
+def check_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--output_dir", type=str, help="Directory where training files will be written.",
+                        nargs='?', default="output/", const="output/")
+    parser.add_argument("--directed", type=bool, help="Must be set if graph is directed.",
+                        nargs='?', default=False, const=False)
+    parser.add_argument("--partition",type=bool, help="If set (default), separates a test split, containing half of the edges. In which case, train graph will be connected.',
+                        nargs='?', default=True, const=True)
+    parser.add_argument("--num_experiments", type=int, help="Enter the number of experiments that you want to do",
+                        nargs='?', default=25, const=25)
+    parser.add_argument("--num_walks", type=int, help="Number of walks per node.",
+                        nargs='?', default=5, const=5)
+    parser.add_argument("--walk_length", type=int, help="Length of each walk. Total number of pairs will be\n O(walk_length * num_walks * num nodes * context^2)",
+                        nargs='?', default=40, const=40)
+    parser.add_argument("--context", type=int, help="Size of context from each side (right and left). If \n --directed, then context is only taken from right side",
+                        nargs='?', default=3, const=3)
+    parser.add_argument("--only_simulate_walks", type=bool, help="If set, train.txt.npy will be read from --output_dir, \n random walks will be simulated, out their output will be\n written to --output_dir",
+                        nargs='?', default=False, const=False)
+    parser.add_argument("--input", type=str, help="Path to edge-list textfile. Required unless --only_simulate_walks is set.",
+                        nargs='?', default="datasets/CA-HepTh.txt", const="datasets/CA-HepTh.txt")
+    parser.add_argument("--bs", type=int, help="Enter the size of the batch",
+                        nargs='?', default=256, const=256)
 
-flags.DEFINE_string('input', '',
-                    'Path to edge-list textfile. Required unless '
-                    '--only_simulate_walks is set.')
-flags.DEFINE_boolean('only_simulate_walks', False,
-                     'If set, train.txt.npy will be read from --output_dir, '
-                     'random walks will be simulated, out their output will be '
-                     'written to --output_dir')
-flags.DEFINE_string('output_dir', '',
-                    'Directory where training files will be written.')
-flags.DEFINE_boolean('directed', False, 'Must be set if graph is directed.')
-flags.DEFINE_boolean('partition', True,
-                     'If set (default), separates a test split, containing '
-                     'half of the edges. In which case, train graph will be '
-                     'connected.')
+    args = parser.parse_args()
+    input_ = args.input
+    only_simulate_walks = args.only_simulate_walks
+    output_dir = args.output_dir
+    directed = args.directed
+    partition = args.partition
+    num_walks = args.num_walks
+    walk_length = args.walk_length
+    context = args.context
+    
+    
+    return input_, only_simulate_walks, output_dir, directeds, partition, num_walks, walk_length, context
 
-flags.DEFINE_integer('num_walks', 5, 'Number of walks per node.')
-flags.DEFINE_integer('walk_length', 40,
-                     'Length of each walk. Total number of pairs will be '
-                     'O(walk_length * num_walks * num nodes * context^2)')
-flags.DEFINE_integer('context', 3,
-                     'Size of context from each side (right and left). If '
-                     '--directed, then context is only taken from right side')
-
-FLAGS = flags.FLAGS
+#flags.DEFINE_string('input', '',
+#                    'Path to edge-list textfile. Required unless '
+#                    '--only_simulate_walks is set.')
+#flags.DEFINE_boolean('only_simulate_walks', False,
+#                     'If set, train.txt.npy will be read from --output_dir, '
+#                     'random walks will be simulated, out their output will be '
+#                     'written to --output_dir')
+#flags.DEFINE_string('output_dir', '',
+#                    'Directory where training files will be written.')
+#flags.DEFINE_boolean('directed', False, 'Must be set if graph is directed.')
+#flags.DEFINE_boolean('partition', True,
+#                     'If set (default), separates a test split, containing '
+#                     'half of the edges. In which case, train graph will be '
+#                     'connected.')
+#
+#flags.DEFINE_integer('num_walks', 5, 'Number of walks per node.')
+#flags.DEFINE_integer('walk_length', 40,
+#                     'Length of each walk. Total number of pairs will be '
+#                     'O(walk_length * num_walks * num nodes * context^2)')
+#flags.DEFINE_integer('context', 3,
+#                     'Size of context from each side (right and left). If '
+#                     '--directed, then context is only taken from right side')
+#
+#FLAGS = flags.FLAGS
 
 # node2vec parameters
-N2V_P=1.0
-N2V_Q=1.0
+
 
 
 def LargestSubgraph(graph):
-  """Returns the Largest connected-component of `graph`."""
-  if graph.__class__ == nx.Graph:
-    return LargestUndirectedSubgraph(graph)
-  elif graph.__class__ == nx.DiGraph:
-    largest_undirected_cc = LargestUndirectedSubgraph(nx.Graph(graph))
-    directed_subgraph = nx.DiGraph()
-    for (n1, n2) in graph.edges():
-      if n2 in largest_undirected_cc and n1 in largest_undirected_cc[n2]:
-        directed_subgraph.add_edge(n1, n2)
+    """Returns the Largest connected-component of `graph`."""
+    if graph.__class__ == nx.Graph:
+        return LargestUndirectedSubgraph(graph)
+    elif graph.__class__ == nx.DiGraph:
+        largest_undirected_cc = LargestUndirectedSubgraph(nx.Graph(graph))
+        directed_subgraph = nx.DiGraph()
+        for (n1, n2) in graph.edges():
+            if n2 in largest_undirected_cc and n1 in largest_undirected_cc[n2]:
+                directed_subgraph.add_edge(n1, n2)
 
     return directed_subgraph
 
 def LargestUndirectedSubgraph(graph):
-  """Returns the largest connected-component of undirected `graph`."""
-  if nx.is_connected(graph):
-    return graph
-
-  cc = list(nx.connected_component_subgraphs(graph))
-  sizes = map(len, cc)
-  sizes_and_cc = zip(sizes, cc)
-  sizes_and_cc.sort()
-
-  return sizes_and_cc[-1][1]
+    """Returns the largest connected-component of undirected `graph`."""
+    if nx.is_connected(graph):
+        return graph
+    cc = list(nx.connected_component_subgraphs(graph))
+    sizes = map(len, cc)
+    sizes_and_cc = zip(sizes, cc)
+    sizes_and_cc.sort()
+    return sizes_and_cc[-1][1]
 
 def SampleTestEdgesAndPruneGraph(graph, remove_percent=0.5, check_every=5):
-  """Removes and returns `remove_percent` of edges from graph.
-
-  Removal is random but makes sure graph stays connected."""
-  graph = copy.deepcopy(graph)
-  undirected_graph = graph.to_undirected()
-
-  edges = copy.deepcopy(graph.edges())
-  random.shuffle(edges)
-  remove_edges = int(len(edges) * remove_percent)
-  num_edges_removed = 0
-  currently_removing_edges = []
-  removed_edges = []
-  last_printed_prune_percentage = -1
-  for j in xrange(len(edges)):
-    n1, n2 = edges[j]
-    graph.remove_edge(n1, n2)
-    if n1 not in graph[n2]:
-      undirected_graph.remove_edge(*(edges[j]))
-    currently_removing_edges.append(edges[j])
-    if j % check_every == 0:
-      if nx.is_connected(undirected_graph):
-        num_edges_removed += check_every
-        removed_edges += currently_removing_edges
-        currently_removing_edges = []
-      else:
-        for i in xrange(check_every):
-          graph.add_edge(*(edges[j - i]))
-          undirected_graph.add_edge(*(edges[j - i]))
-        currently_removing_edges = []
-        if not nx.is_connected(undirected_graph):
-          print( '  DID NOT RECOVER :(')
-          return None
+    """Removes and returns `remove_percent` of edges from graph.
+    
+    Removal is random but makes sure graph stays connected."""
+    graph = copy.deepcopy(graph)
+    undirected_graph = graph.to_undirected()
+    edges = copy.deepcopy(graph.edges())
+    random.shuffle(edges)
+    remove_edges = int(len(edges) * remove_percent)
+    num_edges_removed = 0
+    currently_removing_edges = []
+    removed_edges = []
+    last_printed_prune_percentage = -1
+    for j in xrange(len(edges)):
+        n1, n2 = edges[j]
+        graph.remove_edge(n1, n2)
+        if n1 not in graph[n2]:
+            undirected_graph.remove_edge(*(edges[j]))
+        currently_removing_edges.append(edges[j])
+        if j % check_every == 0:
+            if nx.is_connected(undirected_graph):
+                num_edges_removed += check_every
+                removed_edges += currently_removing_edges
+                currently_removing_edges = []
+            else:
+                for i in xrange(check_every):
+                    graph.add_edge(*(edges[j - i]))
+                    undirected_graph.add_edge(*(edges[j - i]))
+                currently_removing_edges = []
+                if not nx.is_connected(undirected_graph):
+                    print( '  DID NOT RECOVER :(')
+                    return None
     prunned_percentage = int(100 * len(removed_edges) / remove_edges)
     rounded = (prunned_percentage / 10) * 10
     if rounded != last_printed_prune_percentage:
-      last_printed_prune_percentage = rounded
-      print (f'Partitioning into train/test. Progress={rounded}')
-
+        last_printed_prune_percentage = rounded
+        print (f'Partitioning into train/test. Progress={rounded}')
+        
     if len(removed_edges) >= remove_edges:
-      break
+        break
 
-  return graph, removed_edges
+    return graph, removed_edges
 
 
 def SampleNegativeEdges(graph, num_edges):
@@ -301,7 +333,7 @@ def CreateDatasetFiles(graph, output_dir, partition=True):
   numpy.save(os.path.join(output_dir, 'train.neg.txt'), train_eval_negatives)
   numpy.save(os.path.join(output_dir, 'test.txt'), test_edges)
   numpy.save(os.path.join(output_dir, 'test.neg.txt'), test_negatives)
-  if FLAGS.directed:
+  if directed:
     directed_negatives = MakeDirectedNegatives(
         numpy.concatenate([train_edges, test_edges], axis=0))
     directed_negatives = numpy.concatenate([directed_negatives, test_negatives],
@@ -354,8 +386,8 @@ def SimulateWalks(train_graph, output_dir, num_walks=10, walk_length=80,
   node2vec_graph.preprocess_transition_probs()
 
   pairs_writer = WalkPairsWriter(os.path.join(output_dir, 'train.pairs.%i'))
-  for unused_j in xrange(FLAGS.num_walks):
-    walks = node2vec_graph.simulate_walks(1, FLAGS.walk_length)
+  for unused_j in xrange(num_walks):
+    walks = node2vec_graph.simulate_walks(1, walk_length)
 
     for c, node_list in enumerate(walks):
       if c % 1000 == 0:
@@ -372,38 +404,41 @@ def SimulateWalks(train_graph, output_dir, num_walks=10, walk_length=80,
   print(f'All Done. Nodes = {len(train_graph)}')
 
 def main(unused_argv):
-  if FLAGS.directed:
+  if directed:
     graph = nx.DiGraph()
   else:
     graph = nx.Graph()
 
-  if not FLAGS.only_simulate_walks:
+  if not only_simulate_walks:
     # Read graph
-    graph = nx.read_edgelist(FLAGS.input, create_using=graph)
+    graph = nx.read_edgelist(input_, create_using=graph)
 
     # Create dataset files.
     graph = CreateDatasetFiles(
-        graph, FLAGS.output_dir, num_walks=FLAGS.num_walks,
-        context_right=FLAGS.context, context_left=FLAGS.context*FLAGS.directed,
-        walk_length=FLAGS.walk_length, p=N2V_P, q=N2V_Q)
+        graph, output_dir, num_walks=num_walks,
+        context_right=context, context_left=context*directed,
+        walk_length=walk_length, p=N2V_P, q=N2V_Q)
   else:
     if os.path.exists(
-        os.path.join(FLAGS.output_dir, 'test.directed.neg.txt.npy')):
+        os.path.join(output_dir, 'test.directed.neg.txt.npy')):
       graph = nx.DiGraph()
-      FLAGS.directed = True
+      directed = True
 
     # Only simulating walks. Read graph from --output_dir
-    train_edges = numpy.load(os.path.join(FLAGS.output_dir, 'train.txt.npy'))
+    train_edges = numpy.load(os.path.join(output_dir, 'train.txt.npy'))
     for n1, n2 in list(train_edges):
       graph.add_edge(n1, n2)
 
-  left_context = FLAGS.context * (not FLAGS.directed)
+  left_context = context * (not directed)
   print(f'left_context = {left_context}' )
   SimulateWalks(
-      graph, FLAGS.output_dir, num_walks=FLAGS.num_walks,
-      context_right=FLAGS.context, context_left=left_context,
-      walk_length=FLAGS.walk_length, p=N2V_P, q=N2V_Q)
+      graph, output_dir, num_walks=num_walks,
+      context_right=context, context_left=left_context,
+      walk_length=walk_length, p=N2V_P, q=N2V_Q)
 
 
 if __name__ == '__main__':
-  tf.compat.v1.app.run(main)
+    N2V_P=1.0
+    N2V_Q=1.0
+    input_, only_simulate_walks, output_dir, directeds, partition, num_walks, walk_length, context = check_args()
+    tf.compat.v1.app.run(main)
