@@ -62,7 +62,7 @@ def check_args():
                         nargs='?', default="output/", const="output/")
     parser.add_argument("--directed", type=bool, help="Must be set if graph is directed.",
                         nargs='?', default=False, const=False)
-    parser.add_argument("--partition",type=bool, help="If set (default), separates a test split, containing half of the edges. In which case, train graph will be connected.',
+    parser.add_argument("--partition",type=bool, help="If set (default), separates a test split, containing half of the edges. In which case, train graph will be connected.",
                         nargs='?', default=True, const=True)
     parser.add_argument("--num_experiments", type=int, help="Enter the number of experiments that you want to do",
                         nargs='?', default=25, const=25)
@@ -90,7 +90,7 @@ def check_args():
     context = args.context
     
     
-    return input_, only_simulate_walks, output_dir, directeds, partition, num_walks, walk_length, context
+    return input_, only_simulate_walks, output_dir, directed, partition, num_walks, walk_length, context
 
 #flags.DEFINE_string('input', '',
 #                    'Path to edge-list textfile. Required unless '
@@ -118,7 +118,8 @@ def check_args():
 #FLAGS = flags.FLAGS
 
 # node2vec parameters
-
+N2V_P = 1.0
+N2V_Q = 1.0
 
 
 def LargestSubgraph(graph):
@@ -138,10 +139,15 @@ def LargestUndirectedSubgraph(graph):
     """Returns the largest connected-component of undirected `graph`."""
     if nx.is_connected(graph):
         return graph
-    cc = list(nx.connected_component_subgraphs(graph))
+    cc = (graph.subgraph(c) for c in nx.connected_components(graph))
+    cc = list(cc)
+    # cc = list(nx.connected_component_subgraphs(graph))
     sizes = map(len, cc)
     sizes_and_cc = zip(sizes, cc)
-    sizes_and_cc.sort()
+    sizes_and_cc = sorted(sizes_and_cc, key=lambda x: x[0])
+    # changed here
+    # sizes_and_cc.sort()
+    sizes_and_cc = list(sizes_and_cc)
     return sizes_and_cc[-1][1]
 
 def SampleTestEdgesAndPruneGraph(graph, remove_percent=0.5, check_every=5):
@@ -151,13 +157,15 @@ def SampleTestEdgesAndPruneGraph(graph, remove_percent=0.5, check_every=5):
     graph = copy.deepcopy(graph)
     undirected_graph = graph.to_undirected()
     edges = copy.deepcopy(graph.edges())
+    edges = list(edges)
+    # changed to list here
     random.shuffle(edges)
     remove_edges = int(len(edges) * remove_percent)
     num_edges_removed = 0
     currently_removing_edges = []
     removed_edges = []
     last_printed_prune_percentage = -1
-    for j in xrange(len(edges)):
+    for j in range(len(edges)):
         n1, n2 = edges[j]
         graph.remove_edge(n1, n2)
         if n1 not in graph[n2]:
@@ -169,276 +177,276 @@ def SampleTestEdgesAndPruneGraph(graph, remove_percent=0.5, check_every=5):
                 removed_edges += currently_removing_edges
                 currently_removing_edges = []
             else:
-                for i in xrange(check_every):
+                for i in range(check_every):
                     graph.add_edge(*(edges[j - i]))
                     undirected_graph.add_edge(*(edges[j - i]))
                 currently_removing_edges = []
                 if not nx.is_connected(undirected_graph):
                     print( '  DID NOT RECOVER :(')
                     return None
-    prunned_percentage = int(100 * len(removed_edges) / remove_edges)
-    rounded = (prunned_percentage / 10) * 10
-    if rounded != last_printed_prune_percentage:
-        last_printed_prune_percentage = rounded
-        print (f'Partitioning into train/test. Progress={rounded}')
-        
-    if len(removed_edges) >= remove_edges:
-        break
+        prunned_percentage = int(100 * len(removed_edges) / remove_edges)
+        rounded = (prunned_percentage / 10) * 10
+        if rounded != last_printed_prune_percentage:
+            last_printed_prune_percentage = rounded
+            print (f'Partitioning into train/test. Progress={rounded}')
+            
+        if len(removed_edges) >= remove_edges:
+            break
 
     return graph, removed_edges
 
 
 def SampleNegativeEdges(graph, num_edges):
-  """Samples `num_edges` edges from compliment of `graph`."""
-  random_negatives = set()
-  nodes = list(graph.nodes())
-  while len(random_negatives) < num_edges:
-    i1 = random.randint(0, len(nodes) - 1)
-    i2 = random.randint(0, len(nodes) - 1)
-    if i1 == i2:
-      continue
-    if i1 > i2:
-      i1, i2 = i2, i1
-    n1 = nodes[i1]
-    n2 = nodes[i2]
-    if graph.has_edge(n1, n2):
-      continue
-    random_negatives.add((n1, n2))
+    """Samples `num_edges` edges from compliment of `graph`."""
+    random_negatives = set()
+    nodes = list(graph.nodes())
+    while len(random_negatives) < num_edges:
+        i1 = random.randint(0, len(nodes) - 1)
+        i2 = random.randint(0, len(nodes) - 1)
+        if i1 == i2:
+            continue
+        if i1 > i2:
+            i1, i2 = i2, i1
+        n1 = nodes[i1]
+        n2 = nodes[i2]
+        if graph.has_edge(n1, n2):
+            continue
+        random_negatives.add((n1, n2))
 
-  return random_negatives
+    return random_negatives
 
 
 def RandomNegativesPerNode(graph, negatives_per_node=400):
-  """For every node u in graph, samples 20 (u, v) where v is not in graph[u]."""
-  negatives = []
-  node_list = list(graph.nodes())
-  num_nodes = len(node_list)
-  print_every = num_nodes / 10
-  for i, n in enumerate(node_list):
-    found_negatives = 0
-    if i % print_every == 0:
-      print (f'Finished sampling negatives for {i} / {num_nodes} nodes')
-    while found_negatives < negatives_per_node:
-      n2 = node_list[random.randint(0, num_nodes - 1)]
-      if n == n2 or n2 in graph[n]:
-        continue
-      negatives.append((n, n2))
-      found_negatives += 1
-  return negatives
+    """For every node u in graph, samples 20 (u, v) where v is not in graph[u]."""
+    negatives = []
+    node_list = list(graph.nodes())
+    num_nodes = len(node_list)
+    print_every = num_nodes / 10
+    for i, n in enumerate(node_list):
+        found_negatives = 0
+        if i % print_every == 0:
+            print (f'Finished sampling negatives for {i} / {num_nodes} nodes')
+        while found_negatives < negatives_per_node:
+            n2 = node_list[random.randint(0, num_nodes - 1)]
+            if n == n2 or n2 in graph[n]:
+                continue
+            negatives.append((n, n2))
+            found_negatives += 1
+    return negatives
 
 
 def NumberNodes(graph):
-  """Returns a copy of `graph` where nodes are replaced by incremental ints."""
-  node_list = sorted(graph.nodes())
-  index = {n: i for (i, n) in enumerate(node_list)}
+    """Returns a copy of `graph` where nodes are replaced by incremental ints."""
+    node_list = sorted(graph.nodes())
+    index = {n: i for (i, n) in enumerate(node_list)}
+    
+    newgraph = graph.__class__()
+    for (n1, n2) in graph.edges():
+        newgraph.add_edge(index[n1], index[n2])
 
-  newgraph = graph.__class__()
-  for (n1, n2) in graph.edges():
-    newgraph.add_edge(index[n1], index[n2])
-
-  return newgraph, index
+    return newgraph, index
 
 
 class WalkPairsWriter(object):
-  """Writes one or more int numpy.array of size (S, 2).
-  
-  Where `S` is the size of the array, up to `self.capacity`. The total number
-  of pairs should be the number of times `AddPair` is called.
-  """
+    """Writes one or more int numpy.array of size (S, 2).
+    
+    Where `S` is the size of the array, up to `self.capacity`. The total number
+    of pairs should be the number of times `AddPair` is called.
+    """
+    
+    def __init__(self, file_format):
+        """file_format must contain %i."""
+        self.file_format = file_format
+        self.capacity = 1000000   # 1 million.
+        self.pairs = []
+        self.next_file_id = 0
 
-  def __init__(self, file_format):
-    """file_format must contain %i."""
-    self.file_format = file_format
-    self.capacity = 1000000   # 1 million.
-    self.pairs = []
-    self.next_file_id = 0
-
-  def AddPair(self, n1, n2):
-    self.pairs.append((n1, n2))
-    if len(self.pairs) > self.capacity:
-      self.Write()
-
-  def Write(self):
-    if len(self.pairs) == 0:
-      return
-    file_name = self.file_format % self.next_file_id
-    random.shuffle(self.pairs)
-    pairs_arr = numpy.array(self.pairs, dtype='int32')
-    numpy.save(file_name, pairs_arr)
-    self.pairs = []
-    self.next_file_id += 1
-
-
+    def AddPair(self, n1, n2):
+        self.pairs.append((n1, n2))
+        if len(self.pairs) > self.capacity:
+            self.Write()
+            
+    def Write(self):
+        if len(self.pairs) == 0:
+          return
+        file_name = self.file_format % self.next_file_id
+        random.shuffle(self.pairs)
+        pairs_arr = numpy.array(self.pairs, dtype='int32')
+        numpy.save(file_name, pairs_arr)
+        self.pairs = []
+        self.next_file_id += 1
+        
+        
 def MakeDirectedNegatives(positive_edges):
-  positive_set = set([(u, v) for (u, v) in list(positive_edges)])
-  directed_negatives = []
-  for (u, v) in positive_set:
-    if (v, u) not in positive_set:
-      directed_negatives.append((v, u))
-  return numpy.array(directed_negatives, dtype='int32')
+    positive_set = set([(u, v) for (u, v) in list(positive_edges)])
+    directed_negatives = []
+    for (u, v) in positive_set:
+        if (v, u) not in positive_set:
+            directed_negatives.append((v, u))
+    return numpy.array(directed_negatives, dtype='int32')
 
 
-def CreateDatasetFiles(graph, output_dir, partition=True):
-  """Writes a number of dataset files to `output_dir`.
+def CreateDatasetFiles(graph, output_dir, num_walks,
+            context_right, context_left,
+            walk_length, p, q ,partition=True):
+    """
+    Writes a number of dataset files to `output_dir`.
+    
+    Args:
+        graph: nx.Graph or nx.DiGraph to simulate walks on and extract negatives.
+        output_dir: files will be written in this directory, including:
+          {train, train.neg, test, test.neg}.txt.npy, index.pkl, and
+          if flag --directed is set, test.directed.neg.txt.npy.
+          The files {train, train.neg}.txt.npy are used for model selection;
+          {test, test.neg, test.directed.neg}.txt.npy will be used for calculating
+          eval metrics; index.pkl contains information about the graph (# of nodes,
+          mapping from original graph IDs to new assigned integer ones in
+          [0, largest_cc_size-1].
+        partition: If set largest connected component will be used and data will 
+          separated into train/test splits.
+          
+   Returns:
+       The training graph, after node renumbering.
+    """
+    num_floats = num_walks * walk_length * len(graph)
+    num_floats *= (context_left + context_right) ** 2
+    print(f"Writing up to {num_floats} training pairs, with size = {num_floats * 4/1000000.0} megabytes.")
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
 
-  Args:
-    graph: nx.Graph or nx.DiGraph to simulate walks on and extract negatives.
-    output_dir: files will be written in this directory, including:
-      {train, train.neg, test, test.neg}.txt.npy, index.pkl, and
-      if flag --directed is set, test.directed.neg.txt.npy.
-      The files {train, train.neg}.txt.npy are used for model selection;
-      {test, test.neg, test.directed.neg}.txt.npy will be used for calculating
-      eval metrics; index.pkl contains information about the graph (# of nodes,
-      mapping from original graph IDs to new assigned integer ones in
-      [0, largest_cc_size-1].
-    partition: If set largest connected component will be used and data will 
-      separated into train/test splits.
+    original_size = len(graph)
+    if partition:
+        graph = LargestSubgraph(graph)
+        size_largest_cc = len(graph)
+    else:
+        size_largest_cc = -1
+    graph, index = NumberNodes(graph)
 
-  Returns:
-    The training graph, after node renumbering.
-  """
-  num_floats = num_walks * walk_length * len(graph)
-  num_floats *= (context_left + context_right) ** 2
-  print(f"Writing up to {num_floats} training pairs, with size = {num_floats * 4/1000000.0} megabytes.")
-  if not os.path.exists(output_dir):
-    os.makedirs(output_dir)
+    if partition:
+        train_graph, test_edges = SampleTestEdgesAndPruneGraph(graph)
+    else:
+        train_graph, test_edges = graph, []
 
-  original_size = len(graph)
-  if partition:
-    graph = LargestSubgraph(graph)
-    size_largest_cc = len(graph)
-  else:
-    size_largest_cc = -1
-  graph, index = NumberNodes(graph)
-
-  if partition:
-    train_graph, test_edges = SampleTestEdgesAndPruneGraph(graph)
-  else:
-    train_graph, test_edges = graph, []
-
-  # Sample negatives, to be equal to number of `test_edges` * 2.
-  random_negatives = list(
+    # Sample negatives, to be equal to number of `test_edges` * 2.
+    random_negatives = list(
       SampleNegativeEdges(graph, len(test_edges) + len(train_graph.edges())))
-  random.shuffle(random_negatives)
-  test_negatives = random_negatives[:len(test_edges)]
-  # These are only used for evaluation, never training.
-  train_eval_negatives = random_negatives[len(test_edges):]
+    random.shuffle(random_negatives)
+    test_negatives = random_negatives[:len(test_edges)]
+    # These are only used for evaluation, never training.
+    train_eval_negatives = random_negatives[len(test_edges):]
 
-  test_negatives = numpy.array(test_negatives, dtype='int32')
-  test_edges = numpy.array(test_edges, dtype='int32')
-  train_edges = numpy.array(train_graph.edges(), dtype='int32')
-  train_eval_negatives = numpy.array(train_eval_negatives, dtype='int32')
+    test_negatives = numpy.array(test_negatives, dtype='int32')
+    test_edges = numpy.array(test_edges, dtype='int32')
+    train_edges = numpy.array(train_graph.edges(), dtype='int32')
+    train_eval_negatives = numpy.array(train_eval_negatives, dtype='int32')
 
-  numpy.save(os.path.join(output_dir, 'train.txt'), train_edges)
-  numpy.save(os.path.join(output_dir, 'train.neg.txt'), train_eval_negatives)
-  numpy.save(os.path.join(output_dir, 'test.txt'), test_edges)
-  numpy.save(os.path.join(output_dir, 'test.neg.txt'), test_negatives)
-  if directed:
-    directed_negatives = MakeDirectedNegatives(
-        numpy.concatenate([train_edges, test_edges], axis=0))
-    directed_negatives = numpy.concatenate([directed_negatives, test_negatives],
-                                           axis=0)
-    numpy.save(
+    numpy.save(os.path.join(output_dir, 'train.txt'), train_edges)
+    numpy.save(os.path.join(output_dir, 'train.neg.txt'), train_eval_negatives)
+    numpy.save(os.path.join(output_dir, 'test.txt'), test_edges)
+    numpy.save(os.path.join(output_dir, 'test.neg.txt'), test_negatives)
+    if directed:
+        directed_negatives = MakeDirectedNegatives(
+            numpy.concatenate([train_edges, test_edges], axis=0))
+        directed_negatives = numpy.concatenate([directed_negatives, test_negatives],
+                                            axis=0)
+        numpy.save(
         os.path.join(output_dir, 'test.directed.neg.txt'), directed_negatives)
 
-  cPickle.dump({
-      'index': index,
-      'original_num_nodes': original_size,
-      'largest_cc_num_nodes': size_largest_cc,
-      'num_pos_test_edges': len(test_edges),
-      'num_neg_test_edges': len(test_negatives),
-      'num_pos_train_edges': len(train_edges),
-      'num_neg_train_edges': len(train_eval_negatives),
-  }, open(os.path.join(output_dir, 'index.pkl'), 'w'))
+    cPickle.dump({
+        'index': index,
+        'original_num_nodes': original_size,
+        'largest_cc_num_nodes': size_largest_cc,
+        'num_pos_test_edges': len(test_edges),
+        'num_neg_test_edges': len(test_negatives),
+        'num_pos_train_edges': len(train_edges),
+        'num_neg_train_edges': len(train_eval_negatives),
+    }, open(os.path.join(output_dir, 'index.pkl'), 'wb'))
 
-  return train_graph
+    return train_graph
 
 
 def SimulateWalks(train_graph, output_dir, num_walks=10, walk_length=80,
                   context_left=3, context_right=3, p=N2V_P, q=N2V_Q):
-  """Simulates Random Walks on `train_graph`, writing onto `output_dir`.
+    """Simulates Random Walks on `train_graph`, writing onto `output_dir`.
+    
+    Args:
+        train_graph: nx.Graph or nx.DiGraph to simulate walks on and extract
+          negatives.
+        output_dir: files will be written in this directory, including:
+          train.neg_per_node.txt.npy and train.pairs.<i>.txt.npy, for integer <i> in
+          [0, num_walks - 1]. These files will be used for training the linear
+          approximation of the Graph Likelihood objective.
+        num_walks: Number of walks per node.
+        walk_length: Walk length from every node.
+        context_left: left offset from central word, inclusive.
+        context_right: right offset from central word, inclusive.
+        p: Node2vec's p parameter.
+        q: Node2vec's q parameter.
+        """
+    train_negatives_per_node = RandomNegativesPerNode(train_graph, negatives_per_node=400)
+    train_negatives_per_node = numpy.array(train_negatives_per_node,dtype='int32')
+    numpy.save(os.path.join(output_dir, 'train.neg_per_node.txt'),train_negatives_per_node)
+    
+    for edge in train_graph.edges():
+        train_graph[edge[0]][edge[1]]['weight'] = 1
+    directed = (train_graph.__class__ == nx.DiGraph)
+    node2vec_graph = node2vec.Graph(train_graph, is_directed=directed, p=p, q=q)
+    node2vec_graph.preprocess_transition_probs()
+    
+    pairs_writer = WalkPairsWriter(os.path.join(output_dir, 'train.pairs.%i'))
+    for unused_j in range(num_walks):
+        walks = node2vec_graph.simulate_walks(1, walk_length)
+        
+        for c, node_list in enumerate(walks):
+            if c % 1000 == 0:
+                print(f'Writing Walk Pairs {c} / {len(walks)}' )
+            for i in range(len(node_list)):
+                start_i = max(0, i - context_left)
+                end_i = min(len(node_list), i + context_right + 1)
+                for k in range(start_i, end_i):
+                    # if i == k: continue
+                    pairs_writer.AddPair(node_list[i], node_list[k])
 
-  Args:
-    train_graph: nx.Graph or nx.DiGraph to simulate walks on and extract
-      negatives.
-    output_dir: files will be written in this directory, including:
-      train.neg_per_node.txt.npy and train.pairs.<i>.txt.npy, for integer <i> in
-      [0, num_walks - 1]. These files will be used for training the linear
-      approximation of the Graph Likelihood objective.
-    num_walks: Number of walks per node.
-    walk_length: Walk length from every node.
-    context_left: left offset from central word, inclusive.
-    context_right: right offset from central word, inclusive.
-    p: Node2vec's p parameter.
-    q: Node2vec's q parameter.
-  """
-  train_negatives_per_node = RandomNegativesPerNode(
-      train_graph, negatives_per_node=400)
-  train_negatives_per_node = numpy.array(train_negatives_per_node,
-                                         dtype='int32')
-  numpy.save(os.path.join(output_dir, 'train.neg_per_node.txt'),
-             train_negatives_per_node)
+    pairs_writer.Write()
+    
+    print(f'All Done. Nodes = {len(train_graph)}')
 
-  for edge in train_graph.edges():
-    train_graph[edge[0]][edge[1]]['weight'] = 1
-  directed = (train_graph.__class__ == nx.DiGraph)
-  node2vec_graph = node2vec.Graph(train_graph, is_directed=directed, p=p, q=q)
-  node2vec_graph.preprocess_transition_probs()
+def main_exp(directed):
+    if directed:
+        graph = nx.DiGraph()
+    else:
+        graph = nx.Graph()
 
-  pairs_writer = WalkPairsWriter(os.path.join(output_dir, 'train.pairs.%i'))
-  for unused_j in xrange(num_walks):
-    walks = node2vec_graph.simulate_walks(1, walk_length)
+    if not only_simulate_walks:
+        # Read graph
+        graph = nx.read_edgelist(input_, create_using=graph)
 
-    for c, node_list in enumerate(walks):
-      if c % 1000 == 0:
-        print(f'Writing Walk Pairs {c} / {len(walks)}' )
-      for i in xrange(len(node_list)):
-        start_i = max(0, i - context_left)
-        end_i = min(len(node_list), i + context_right + 1)
-        for k in xrange(start_i, end_i):
-          # if i == k: continue
-          pairs_writer.AddPair(node_list[i], node_list[k])
+        # Create dataset files.
+        graph = CreateDatasetFiles(
+            graph, output_dir, num_walks=num_walks,
+            context_right=context, context_left=context*directed,
+            walk_length=walk_length, p=N2V_P, q=N2V_Q)
+    else:
+        if os.path.exists(os.path.join(output_dir, 'test.directed.neg.txt.npy')):
+            graph = nx.DiGraph()
+            directed = True
 
-  pairs_writer.Write()
+        # Only simulating walks. Read graph from --output_dir
+        train_edges = numpy.load(os.path.join(output_dir, 'train.txt.npy'))
+        for n1, n2 in list(train_edges):
+            graph.add_edge(n1, n2)
 
-  print(f'All Done. Nodes = {len(train_graph)}')
-
-def main(unused_argv):
-  if directed:
-    graph = nx.DiGraph()
-  else:
-    graph = nx.Graph()
-
-  if not only_simulate_walks:
-    # Read graph
-    graph = nx.read_edgelist(input_, create_using=graph)
-
-    # Create dataset files.
-    graph = CreateDatasetFiles(
+    left_context = context * (not directed)
+    print(f'left_context = {left_context}' )
+    SimulateWalks(
         graph, output_dir, num_walks=num_walks,
-        context_right=context, context_left=context*directed,
+        context_right=context, context_left=left_context,
         walk_length=walk_length, p=N2V_P, q=N2V_Q)
-  else:
-    if os.path.exists(
-        os.path.join(output_dir, 'test.directed.neg.txt.npy')):
-      graph = nx.DiGraph()
-      directed = True
-
-    # Only simulating walks. Read graph from --output_dir
-    train_edges = numpy.load(os.path.join(output_dir, 'train.txt.npy'))
-    for n1, n2 in list(train_edges):
-      graph.add_edge(n1, n2)
-
-  left_context = context * (not directed)
-  print(f'left_context = {left_context}' )
-  SimulateWalks(
-      graph, output_dir, num_walks=num_walks,
-      context_right=context, context_left=left_context,
-      walk_length=walk_length, p=N2V_P, q=N2V_Q)
 
 
 if __name__ == '__main__':
-    N2V_P=1.0
-    N2V_Q=1.0
-    input_, only_simulate_walks, output_dir, directeds, partition, num_walks, walk_length, context = check_args()
-    tf.compat.v1.app.run(main)
+    
+     
+    global input_, only_simulate_walks, output_dir, directed, partition, num_walks, walk_length, context 
+    input_, only_simulate_walks, output_dir, directed, partition, num_walks, walk_length, context = check_args()
+    main_exp(directed=directed)
