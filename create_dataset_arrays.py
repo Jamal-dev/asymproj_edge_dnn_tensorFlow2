@@ -55,6 +55,7 @@ from tensorflow.python.platform import flags
 
 from third_party.node2vec import node2vec
 import argparse
+import csv
 
 def check_args():
     parser = argparse.ArgumentParser()
@@ -337,11 +338,18 @@ def CreateDatasetFiles(graph, output_dir, num_walks,
     test_edges = numpy.array(test_edges, dtype='int32')
     train_edges = numpy.array(train_graph.edges(), dtype='int32')
     train_eval_negatives = numpy.array(train_eval_negatives, dtype='int32')
+    
+   
 
     numpy.save(os.path.join(output_dir, 'train.txt'), train_edges)
     numpy.save(os.path.join(output_dir, 'train.neg.txt'), train_eval_negatives)
     numpy.save(os.path.join(output_dir, 'test.txt'), test_edges)
     numpy.save(os.path.join(output_dir, 'test.neg.txt'), test_negatives)
+    # saving as csv file as well,
+    numpy.savetxt(os.path.join(output_dir, 'train.csv'), train_edges, delimiter=",")
+    numpy.savetxt(os.path.join(output_dir, 'train_neg.csv'), train_eval_negatives, delimiter=",")
+    numpy.savetxt(os.path.join(output_dir, 'test.csv'), test_edges, delimiter=",")
+    numpy.savetxt(os.path.join(output_dir, 'test_neg.csv'), test_negatives, delimiter=",")
     if directed:
         directed_negatives = MakeDirectedNegatives(
             numpy.concatenate([train_edges, test_edges], axis=0))
@@ -349,6 +357,9 @@ def CreateDatasetFiles(graph, output_dir, num_walks,
                                             axis=0)
         numpy.save(
         os.path.join(output_dir, 'test.directed.neg.txt'), directed_negatives)
+        # saving as csv
+        numpy.savetxt(
+        os.path.join(output_dir, 'test_directed_neg.csv'), directed_negatives,delimiter=",")
 
     cPickle.dump({
         'index': index,
@@ -359,6 +370,12 @@ def CreateDatasetFiles(graph, output_dir, num_walks,
         'num_pos_train_edges': len(train_edges),
         'num_neg_train_edges': len(train_eval_negatives),
     }, open(os.path.join(output_dir, 'index.pkl'), 'wb'))
+
+    # saving index as csv
+    with open(os.path.join(output_dir, 'index.csv'), 'w') as csv_file:  
+        writer = csv.writer(csv_file)
+        for key, value in index.items():
+            writer.writerow([key, value])
 
     return train_graph
 
