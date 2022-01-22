@@ -15,6 +15,7 @@
 
 import numpy
 import tensorflow as tf
+tf.compat.v1.disable_eager_execution()
 from tensorflow.python.platform import flags
 import tf_slim as slim
 
@@ -114,6 +115,8 @@ class EdgeNN(object):
 
     # For-loop creates the Neural Network layers. Last layer has no activation
     # but others have relu activation.
+    # changed
+    dnn_dims = list(dnn_dims)
     net = embeddings_combined
     for i, f_d in enumerate(dnn_dims):
       if i < len(dnn_dims) - 1:
@@ -146,7 +149,7 @@ class EdgeNN(object):
       self.g_lefts = []
       self.g_rights = []
       self.edge_r = []
-      for i in xrange(num_projections):
+      for i in range(num_projections):
         name_suffix = ''
         if i > 0:
           name_suffix = '_%i' % i
@@ -280,7 +283,7 @@ class EdgeNN(object):
     else:
       deltas = [1] * len(grads)
     feed_dict = {self.gradients[2 + i]: grads[i] * deltas[i]
-                 for i in xrange(len(grads))}
+                 for i in range(len(grads))}
     feed_dict[self.learn_rate] = FLAGS.learn_rate
 
     sess.run(self.train_op, feed_dict=feed_dict)

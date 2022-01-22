@@ -64,8 +64,6 @@ def check_args():
                         nargs='?', default=False, const=False)
     parser.add_argument("--partition",type=bool, help="If set (default), separates a test split, containing half of the edges. In which case, train graph will be connected.",
                         nargs='?', default=True, const=True)
-    parser.add_argument("--num_experiments", type=int, help="Enter the number of experiments that you want to do",
-                        nargs='?', default=25, const=25)
     parser.add_argument("--num_walks", type=int, help="Number of walks per node.",
                         nargs='?', default=5, const=5)
     parser.add_argument("--walk_length", type=int, help="Length of each walk. Total number of pairs will be\n O(walk_length * num_walks * num nodes * context^2)",
