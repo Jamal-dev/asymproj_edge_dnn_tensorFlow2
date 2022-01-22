@@ -1,3 +1,5 @@
+# Credit
+This work is orginally taken from https://github.com/google/asymproj_edge_dnn. My contribution is just make it work for the tensorflow 2.0.
 # Learning Edge Representations via Low-Rank Asymmetric Projections
 
 Implementation of [ACM CIKM 2017 paper](https://arxiv.org/abs/1705.05615)
